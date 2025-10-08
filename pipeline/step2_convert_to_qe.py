@@ -1,30 +1,13 @@
-"""
-Step 2: Convert Structures to Quantum ESPRESSO Input Files
-Generates QE input files for SCF and NSCF calculations
-"""
 import os
 import sys
 import json
-from pathlib import Path
+import glob
 from tqdm import tqdm
-
-try:
-    from ase.io import read as ase_read
-    from ase.calculators.espresso import Espresso
-except ImportError:
-    print("ERROR: ase not installed. Run: pip install ase")
-    sys.exit(1)
-
-try:
-    from pymatgen.io.ase import AseAtomsAdaptor
-    from pymatgen.io.pwscf import PWInput
-except ImportError:
-    print("WARNING: pymatgen not installed. Using ASE only.")
+from ase.io import read as ase_read
 
 import config
 
 
-# Pseudopotential mapping (using standard SSSP library naming)
 PSEUDO_MAP = {
     'H': 'H.pbe-rrkjus_psl.1.0.0.UPF',
     'Li': 'Li.pbe-sl-rrkjus_psl.1.0.0.UPF',
@@ -59,93 +42,64 @@ PSEUDO_MAP = {
 
 
 def get_pseudopotentials(elements):
-    """Get pseudopotential filenames for given elements - auto-detect from directory
-    Supports multiple naming conventions including SSSP library formats
-    """
-    import glob
     pseudos = {}
     pseudo_dir = config.QE_PSEUDOPOTENTIALS_DIR
     
     for elem in elements:
-        # Try predefined mapping first
         if elem in PSEUDO_MAP:
             pseudo_file = PSEUDO_MAP[elem]
             if os.path.exists(os.path.join(pseudo_dir, pseudo_file)):
                 pseudos[elem] = pseudo_file
                 continue
         
-        # Search for available pseudopotentials with multiple naming patterns
-        # SSSP library uses: element.pbe-*.UPF, element_pbe*.UPF, Element.*.upf
         patterns = [
-            f"{elem}.pbe-*.UPF",           # Standard: Si.pbe-n-rrkjus_psl.1.0.0.UPF
-            f"{elem}.paw*.upf",             # PAW: Ho.paw.z_21.atompaw.wentzcovitch.v1.2.upf
-            f"{elem}_pbe*.UPF",             # Underscore: sb_pbe_v1.4.uspp.F.UPF
-            f"{elem.lower()}_pbe*.UPF",     # Lowercase: li_pbe_v1.4.uspp.F.UPF
-            f"{elem}_ONCV*.upf",            # ONCV: Ag_ONCV_PBE-1.0.oncvpsp.upf
-            f"{elem}*.oncvpsp.upf",         # ONCV alt: Kr_ONCV_PBE-1.0.oncvpsp.upf
-            f"{elem}.*.UPF",                # Any extension
-            f"{elem}*.upf",                 # Case insensitive extension
+            f"{elem}.pbe-*.UPF",
+            f"{elem}.paw*.upf",
+            f"{elem}_pbe*.UPF",
+            f"{elem.lower()}_pbe*.UPF",
+            f"{elem}_ONCV*.upf",
+            f"{elem}*.oncvpsp.upf",
+            f"{elem}.*.UPF",
+            f"{elem}*.upf",
         ]
         
         found = False
         for pattern in patterns:
-            matches = glob.glob(os.path.join(pseudo_dir, pattern), recursive=False)
+            matches = glob.glob(os.path.join(pseudo_dir, pattern))
             if matches:
-                # Prefer PAW or ONCV over USPP, prefer PBE functional
-                # Sort to get most reliable pseudopotentials first
                 matches_sorted = sorted(matches, key=lambda x: (
-                    'paw' not in x.lower(),  # Prefer PAW
-                    'oncv' not in x.lower(),  # Then ONCV
-                    'pbe' not in x.lower(),   # Then PBE
+                    'paw' not in x.lower(),
+                    'oncv' not in x.lower(),
+                    'pbe' not in x.lower(),
                 ))
                 pseudos[elem] = os.path.basename(matches_sorted[0])
-                print(f"  Found pseudo for {elem}: {pseudos[elem]}")
                 found = True
                 break
         
         if not found:
-            print(f"  ERROR: No pseudopotential found for {elem} in {pseudo_dir}")
-            print(f"        Please install missing pseudopotentials")
-            # Use placeholder to allow pipeline to continue
             pseudos[elem] = f"{elem}.pbe-n-rrkjus_psl.1.0.0.UPF"
     
     return pseudos
 
 
 def generate_qe_scf_input(atoms, material_name, output_dir):
-    """
-    Generate QE input file for SCF calculation
-    Args:
-        atoms: ASE Atoms object
-        material_name: Name for output files
-        output_dir: Directory to save files
-    Returns:
-        Path to generated input file
-    """
-    # Get elements
     elements = list(set(atoms.get_chemical_symbols()))
     pseudos = get_pseudopotentials(elements)
     
-    # Create QE input directory
     qe_dir = os.path.join(output_dir, material_name)
     os.makedirs(qe_dir, exist_ok=True)
-    
-    # SCF input file
     scf_input = os.path.join(qe_dir, f"{material_name}_scf.in")
     
-    # Build input file manually for better control
     with open(scf_input, 'w') as f:
-        # Control section
         f.write("&CONTROL\n")
         f.write(f"  calculation = 'scf'\n")
         f.write(f"  prefix = '{material_name}'\n")
         f.write(f"  outdir = './tmp'\n")
         f.write(f"  pseudo_dir = '{config.QE_PSEUDOPOTENTIALS_DIR}'\n")
         f.write(f"  verbosity = 'high'\n")
-        f.write(f"  wf_collect = .false.\n")  # Faster I/O for parallel
+        f.write(f"  wf_collect = .false.\n")
         f.write(f"/\n\n")
         
-        # System section
         f.write("&SYSTEM\n")
         f.write(f"  ibrav = 0\n")
         f.write(f"  nat = {len(atoms)}\n")
@@ -195,22 +149,11 @@ def generate_qe_scf_input(atoms, material_name, output_dir):
 
 
 def generate_qe_nscf_input(atoms, material_name, output_dir):
-    """
-    Generate QE input file for NSCF calculation (for Wannier90)
-    Args:
-        atoms: ASE Atoms object
-        material_name: Name for output files
-        output_dir: Directory to save files
-    Returns:
-        Path to generated input file
-    """
     elements = list(set(atoms.get_chemical_symbols()))
     pseudos = get_pseudopotentials(elements)
     
     qe_dir = os.path.join(output_dir, material_name)
     nscf_input = os.path.join(qe_dir, f"{material_name}_nscf.in")
-    
-    # NSCF with denser k-grid for Wannier
     k_dense = [k * 2 for k in config.K_POINTS]
     
     with open(nscf_input, 'w') as f:
@@ -231,7 +174,7 @@ def generate_qe_nscf_input(atoms, material_name, output_dir):
         f.write(f"  occupations = '{config.OCCUPATIONS}'\n")
         f.write(f"  smearing = '{config.SMEARING}'\n")
         f.write(f"  degauss = {config.DEGAUSS}\n")
-        f.write(f"  nosym = .true.\n")  # Important for Wannier90
+        f.write(f"  nosym = .true.\n")
         f.write(f"  noinv = .true.\n")
         f.write(f"/\n\n")
         
@@ -265,59 +208,37 @@ def generate_qe_nscf_input(atoms, material_name, output_dir):
 
 
 def main():
-    """Main execution function"""
-    print("="*60)
-    print("Step 2: Convert Structures to Quantum ESPRESSO Input")
-    print("="*60)
-    
-    # Load materials summary
     summary_file = os.path.join(config.MATERIALS_DIR, "materials_summary.json")
     if not os.path.exists(summary_file):
-        print(f"ERROR: Materials summary not found: {summary_file}")
-        print("Please run step1_material_selection.py first")
+        print(f"ERROR: Materials summary not found")
         sys.exit(1)
     
     with open(summary_file, 'r') as f:
         materials = json.load(f)
     
-    print(f"\nFound {len(materials)} materials to process")
-    
-    # Create DFT output directory
     os.makedirs(config.DFT_DIR, exist_ok=True)
     
-    # Process each material
     results = []
-    for mat in tqdm(materials, desc="⚛️  Generating QE inputs", unit="material", ncols=100):
+    for mat in tqdm(materials, desc="Generating", unit="mat", ncols=80):
         jid = mat['jid']
-        formula = mat['formula']
-        
-        # Read structure
         poscar_file = mat['files']['poscar']
         atoms = ase_read(poscar_file)
         
-        # Generate QE inputs
         scf_input = generate_qe_scf_input(atoms, jid, config.DFT_DIR)
         nscf_input = generate_qe_nscf_input(atoms, jid, config.DFT_DIR)
         
-        tqdm.write(f"  ✓ {jid} ({formula})")
+        tqdm.write(f"✓ {jid}")
         
         results.append({
             'jid': jid,
-            'formula': formula,
+            'formula': mat['formula'],
             'scf_input': scf_input,
             'nscf_input': nscf_input
         })
     
-    # Save conversion summary
     conversion_summary = os.path.join(config.DFT_DIR, "qe_inputs_summary.json")
     with open(conversion_summary, 'w') as f:
         json.dump(results, f, indent=2)
-    
-    print(f"\n{'='*60}")
-    print(f"✓ Step 2 Complete!")
-    print(f"  QE inputs saved to: {config.DFT_DIR}")
-    print(f"  Summary: {conversion_summary}")
-    print(f"{'='*60}\n")
     
     return results
 

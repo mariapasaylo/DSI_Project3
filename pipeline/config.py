@@ -1,10 +1,5 @@
-"""
-Configuration file for DFT → eDMFT Pipeline
-Centralized settings for all workflow components
-"""
 import os
 
-# Base directories
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PIPELINE_DIR = os.path.join(BASE_DIR, "pipeline")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
@@ -13,35 +8,29 @@ DFT_DIR = os.path.join(OUTPUT_DIR, "dft")
 WANNIER_DIR = os.path.join(OUTPUT_DIR, "wannier")
 EDMFT_DIR = os.path.join(OUTPUT_DIR, "edmft")
 
-# Material selection settings
-N_MATERIALS = 1  # Number of random materials to select (reduced for testing)
-JARVIS_DATABASE = "dft_3d"  # JARVIS database to query
+N_MATERIALS = 1
+RANDOM_SEED = None
+JARVIS_DATABASE = "dft_3d"
 
-# Quantum ESPRESSO settings
-QE_PSEUDOPOTENTIALS_DIR = "/usr/share/espresso/pseudo"  # System QE pseudos
-QE_EXECUTABLE = "pw.x"  # Adjust if QE is not in PATH
-QE_NPROCS = 8  # Number of processors for parallel QE runs (USE ALL CORES!)
-QE_TIMEOUT = 600  # Max time per calculation (seconds) - 10 minutes
-QE_MAX_ITERATIONS = 50  # Max SCF iterations before giving up
+QE_PSEUDOPOTENTIALS_DIR = "/usr/share/espresso/pseudo"
+QE_EXECUTABLE = "pw.x"
+QE_NPROCS = 8
+QE_TIMEOUT = 600
+QE_MAX_ITERATIONS = 50
 
-# DFT calculation parameters
-ECUTWFC = 30.0  # Wavefunction cutoff (Ry) - REDUCED for speed
-ECUTRHO = 120.0  # Charge density cutoff (Ry) - REDUCED for speed
-K_POINTS = [2, 2, 2]  # K-point grid - REDUCED for speed (was [4,4,4])
+ECUTWFC = 30.0
+ECUTRHO = 120.0
+K_POINTS = [2, 2, 2]
 OCCUPATIONS = "smearing"
 SMEARING = "gaussian"
 DEGAUSS = 0.02
 
-# Wannier90 settings
 WANNIER90_EXECUTABLE = "wannier90.x"
-NUM_WANNIER_FUNCTIONS = 10  # Will be adjusted per material
+NUM_WANNIER_FUNCTIONS = 10
 
-# eDMFT/TRIQS settings
-TRIQS_BETA = 40.0  # Inverse temperature (1/eV)
-TRIQS_N_ITER = 20  # Number of DMFT iterations
-HUBBARD_U = 4.0  # Hubbard U parameter (eV)
-CHEMICAL_POTENTIAL = 0.0  # Initial guess
+TRIQS_BETA = 40.0
+TRIQS_N_ITER = 20
+HUBBARD_U = 4.0
+CHEMICAL_POTENTIAL = 0.0
 
-# Output settings
-SAVE_INTERMEDIATE_FILES = True
-VERBOSE = True
+ASK_CLEAR_OUTPUTS = True
