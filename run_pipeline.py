@@ -37,9 +37,6 @@ TRIQS_BETA = 40.0
 DMFT_ITERATIONS = 20
 
 # load random material from database
-print("="*60)
-print("DFT eDMFT Pipeline")
-print("="*60)
 os.makedirs(MATERIALS_DIR, exist_ok=True)
 data = jarvis_data(JARVIS_DATABASE)
 mat = random.choice(data)  # random selection
@@ -48,31 +45,28 @@ jarvis_atoms = JarvisAtoms.from_dict(mat['atoms'])
 ase_atoms = AseAtoms(symbols=jarvis_atoms.elements, positions=jarvis_atoms.cart_coords, cell=jarvis_atoms.lattice_mat, pbc=True)
 poscar_path = os.path.join(MATERIALS_DIR, f"{MATERIAL_ID}.vasp")
 ase_write(poscar_path, ase_atoms, format='vasp')
-print(f"\nMaterial: {MATERIAL_ID} ({mat.get('formula', '')}) - {len(ase_atoms)} atoms")
 
 # generate qe input files
 os.makedirs(DFT_DIR, exist_ok=True)
 atoms = ase_read(poscar_path)
 elements = list(set(atoms.get_chemical_symbols()))
 pseudos = {}
-for e in elements:  # auto-detect pseudopotentials
-    candidates = [f for f in os.listdir(QE_PSEUDOPOTENTIALS_DIR) if f.startswith(e) or f.startswith(e.lower())]
+for e in elements:  # auto-detect pseudopotentials (match element followed by . or _ to avoid Os matching O)
+    candidates = [f for f in os.listdir(QE_PSEUDOPOTENTIALS_DIR) if f.startswith(e+'.') or f.startswith(e+'_') or f.startswith(e.lower()+'.') or f.startswith(e.lower()+'_')]
     pseudos[e] = candidates[0]
 
-# explicit k-points for wannier90 compatibility
+# explicit k-points for wannier90 compatibility (must match wannier90 ordering)
 nk_nscf = [K_POINTS[0]*2, K_POINTS[1]*2, K_POINTS[2]*2]
 nkpts_nscf = nk_nscf[0] * nk_nscf[1] * nk_nscf[2]
 kpoints_nscf = []
-for i in range(nk_nscf[0]):
+for k in range(nk_nscf[2]):
     for j in range(nk_nscf[1]):
-        for k in range(nk_nscf[2]):
+        for i in range(nk_nscf[0]):
             kpoints_nscf.append([i/nk_nscf[0], j/nk_nscf[1], k/nk_nscf[2]])
 
 for calc, k in [('scf', K_POINTS), ('nscf', nk_nscf)]:
     with open(os.path.join(DFT_DIR, f"{MATERIAL_ID}_{calc}.in"), 'w') as f:
         f.write(f"&CONTROL\n  calculation='{calc}'\n  prefix='{MATERIAL_ID}'\n  outdir='./tmp'\n  pseudo_dir='{QE_PSEUDOPOTENTIALS_DIR}'\n")
-        if calc == 'nscf':
-            f.write("  restart_mode='from_scratch'\n")
         f.write("/\n")
         f.write(f"&SYSTEM\n  ibrav=0\n  nat={len(atoms)}\n  ntyp={len(elements)}\n  ecutwfc={ECUTWFC}\n  ecutrho={ECUTRHO}\n  occupations='{OCCUPATIONS}'\n  smearing='{SMEARING}'\n  degauss={DEGAUSS}\n")
         if calc=='nscf': 
@@ -94,26 +88,7 @@ for calc, k in [('scf', K_POINTS), ('nscf', nk_nscf)]:
 # run dft calculations
 import time
 for calc in ['scf', 'nscf']:
-    print(f"Running DFT {calc.upper()}...", flush=True)
-    start_time = time.time()
-    proc = subprocess.Popen(f"cd {DFT_DIR} && mpirun -np {QE_NPROCS} {QE_EXECUTABLE} -in {MATERIAL_ID}_{calc}.in > {MATERIAL_ID}_{calc}.out 2>&1", shell=True)
-    out_file = os.path.join(DFT_DIR, f"{MATERIAL_ID}_{calc}.out")
-    last_line = ""
-    while proc.poll() is None:  # monitor progress
-        time.sleep(2)
-        if os.path.exists(out_file):
-            with open(out_file, 'r', errors='ignore') as f:
-                lines = f.readlines()
-                if lines:
-                    for line in reversed(lines[-20:]):  # check last 20 lines
-                        if 'iteration' in line.lower() or 'etot' in line.lower():
-                            if line.strip() != last_line:
-                                print(f"  {line.strip()}", flush=True)
-                                last_line = line.strip()
-                            break
-    proc.wait()
-    elapsed = time.time() - start_time
-    print(f"  {calc.upper()} complete in {elapsed:.1f}s")
+    subprocess.run(f"cd {DFT_DIR} && mpirun -np {QE_NPROCS} {QE_EXECUTABLE} -in {MATERIAL_ID}_{calc}.in", shell=True)
 
 # wannier90 workflow
 os.makedirs(WANNIER_DIR, exist_ok=True)
@@ -124,10 +99,10 @@ win_file = os.path.join(wan_dir, f"{seedname}.win")
 nk = [K_POINTS[0]*2, K_POINTS[1]*2, K_POINTS[2]*2]
 nkpts = nk[0] * nk[1] * nk[2]
 kpoints = []
-for i in range(nk[0]):
+for k in range(nk[2]):
     for j in range(nk[1]):
-        for k in range(nk[2]):
-            kpoints.append([i/nk[0], j/nk[1], k/nk[2]])  # fractional coordinates
+        for i in range(nk[0]):
+            kpoints.append([i/nk[0], j/nk[1], k/nk[2]])  # fractional coordinates, wannier90 ordering
 with open(win_file, 'w') as f:
     f.write(f"num_wann = {NUM_WANNIER_FUNCTIONS}\n")
     f.write(f"num_bands = {NUM_WANNIER_FUNCTIONS * 3}\n")  # extra bands for disentanglement
@@ -148,10 +123,8 @@ with open(win_file, 'w') as f:
         f.write(f"{kpt[0]:16.10f} {kpt[1]:16.10f} {kpt[2]:16.10f}\n")
     f.write("end kpoints\n")
 
-print("Running Wannier90 preprocessing...", flush=True)
-subprocess.run(f"cd {wan_dir} && {WANNIER90_EXECUTABLE} -pp {seedname} > {seedname}_pp.wout 2>&1", shell=True)
+subprocess.run(f"cd {wan_dir} && {WANNIER90_EXECUTABLE} -pp {seedname}", shell=True)
 
-print("Extracting Wannier matrices from QE...", flush=True)
 pw2wan_input = os.path.join(wan_dir, "pw2wan.in")
 with open(pw2wan_input, 'w') as f:
     f.write("&inputpp\n")
@@ -162,14 +135,9 @@ with open(pw2wan_input, 'w') as f:
     f.write(f"  write_amn = .true.\n")  # projection matrices
     f.write(f"  write_unk = .false.\n")  # skip periodic part of bloch functions
     f.write("/\n")
-start_time = time.time()
-subprocess.run(f"cd {wan_dir} && {PW2WANNIER90_EXECUTABLE} < pw2wan.in > pw2wan.out 2>&1", shell=True)
-print(f"  pw2wannier90 complete in {time.time()-start_time:.1f}s")
+subprocess.run(f"cd {wan_dir} && {PW2WANNIER90_EXECUTABLE} < pw2wan.in", shell=True)
 
-print("Running Wannier90 localization...", flush=True)
-start_time = time.time()
-subprocess.run(f"cd {wan_dir} && {WANNIER90_EXECUTABLE} {seedname} > {seedname}.wout 2>&1", shell=True)
-print(f"  Wannier90 complete in {time.time()-start_time:.1f}s")
+subprocess.run(f"cd {wan_dir} && {WANNIER90_EXECUTABLE} {seedname}", shell=True)
 hr_file = os.path.join(wan_dir, f"{seedname}_hr.dat")
 
 # read tight-binding hamiltonian
@@ -194,15 +162,12 @@ for iteration in range(DMFT_ITERATIONS):  # dmft loop
     pass
 dmft_energy = np.real(np.trace(h_local))
 correlation_energy = dmft_energy - dft_energy
-print(f"eDMFT: DFT={dft_energy:.4f}, DMFT={dmft_energy:.4f}, Corr={correlation_energy:.4f}")
 
 # calculate radiation damage thresholds
 os.makedirs(EDMFT_DIR, exist_ok=True)
 displacement_threshold = DISPLACEMENT_THRESHOLD_EV + abs(correlation_energy) * 0.1 + HUBBARD_U / 10.0  # edmft correction
 pka_threshold = PKA_ENERGY_THRESHOLD_EV * 1.2 * (displacement_threshold / DISPLACEMENT_THRESHOLD_EV)  # primary knock-on atom
 result = {'material_id': MATERIAL_ID, 'displacement_threshold_eV': displacement_threshold, 'pka_energy_threshold_eV': pka_threshold}
-with open(os.path.join(EDMFT_DIR, "thresholds.json"), 'w') as f:
+output_file = os.path.join(EDMFT_DIR, "thresholds.json")
+with open(output_file, 'w') as f:
     json.dump(result, f, indent=2)
-print(f"\nDisplacement: {displacement_threshold:.2f} eV")
-print(f"PKA Energy: {pka_threshold:.2f} eV")
-print("\nDone. Results in outputs/edmft/thresholds.json")
