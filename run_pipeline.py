@@ -31,11 +31,16 @@ NUM_WANNIER_FUNCTIONS = 20
 HUBBARD_U = 4.0
 DISPLACEMENT_THRESHOLD_EV = 25.0
 PKA_ENERGY_THRESHOLD_EV = 100.0
-WANNIER90_EXECUTABLE = os.path.join(os.environ.get('CONDA_PREFIX', '/home/vm/miniconda3/envs/DSI'), 'bin', 'wannier90.x')
+WANNIER90_EXECUTABLE = "/home/vm/miniconda3/envs/DSI/bin/wannier90.x"
+PW2WANNIER90_EXECUTABLE = "/home/vm/miniconda3/envs/DSI/bin/pw2wannier90.x"
 TRIQS_BETA = 40.0
 DMFT_ITERATIONS = 20
 
 # ========== STEP 1: LOAD MATERIAL FROM JARVIS ==========
+print("="*60)
+print("DFT-eDMFT-NIEL Pipeline")
+print("Estimated total time: 3-8 minutes per material")
+print("="*60)
 os.makedirs(MATERIALS_DIR, exist_ok=True)
 data = jarvis_data(JARVIS_DATABASE)
 mat = random.choice(data)
@@ -44,7 +49,7 @@ jarvis_atoms = JarvisAtoms.from_dict(mat['atoms'])
 ase_atoms = AseAtoms(symbols=jarvis_atoms.elements, positions=jarvis_atoms.cart_coords, cell=jarvis_atoms.lattice_mat, pbc=True)
 poscar_path = os.path.join(MATERIALS_DIR, f"{MATERIAL_ID}.vasp")
 ase_write(poscar_path, ase_atoms, format='vasp')
-print(f"Material: {MATERIAL_ID} ({mat.get('formula', '')})")
+print(f"\nMaterial: {MATERIAL_ID} ({mat.get('formula', '')}) - {len(ase_atoms)} atoms")
 
 # ========== STEP 2: GENERATE QUANTUM ESPRESSO INPUT FILES ==========
 os.makedirs(DFT_DIR, exist_ok=True)
@@ -54,31 +59,67 @@ pseudos = {}
 for e in elements:
     candidates = [f for f in os.listdir(QE_PSEUDOPOTENTIALS_DIR) if f.startswith(e) or f.startswith(e.lower())]
     pseudos[e] = candidates[0] if candidates else f"{e}.UPF"
-for calc, k in [('scf', K_POINTS), ('nscf', [k*2 for k in K_POINTS])]:
+
+# Generate explicit k-points for NSCF (needed for Wannier90 compatibility)
+nk_nscf = [K_POINTS[0]*2, K_POINTS[1]*2, K_POINTS[2]*2]
+nkpts_nscf = nk_nscf[0] * nk_nscf[1] * nk_nscf[2]
+kpoints_nscf = []
+for i in range(nk_nscf[0]):
+    for j in range(nk_nscf[1]):
+        for k in range(nk_nscf[2]):
+            kpoints_nscf.append([i/nk_nscf[0], j/nk_nscf[1], k/nk_nscf[2]])
+
+for calc, k in [('scf', K_POINTS), ('nscf', nk_nscf)]:
     with open(os.path.join(DFT_DIR, f"{MATERIAL_ID}_{calc}.in"), 'w') as f:
         f.write(f"&CONTROL\n  calculation='{calc}'\n  prefix='{MATERIAL_ID}'\n  outdir='./tmp'\n  pseudo_dir='{QE_PSEUDOPOTENTIALS_DIR}'\n")
         if calc == 'nscf':
             f.write("  restart_mode='from_scratch'\n")
         f.write("/\n")
         f.write(f"&SYSTEM\n  ibrav=0\n  nat={len(atoms)}\n  ntyp={len(elements)}\n  ecutwfc={ECUTWFC}\n  ecutrho={ECUTRHO}\n  occupations='{OCCUPATIONS}'\n  smearing='{SMEARING}'\n  degauss={DEGAUSS}\n")
-        if calc=='nscf': f.write("  nosym=.true.\n  noinv=.true.\n")
+        if calc=='nscf': 
+            f.write("  nosym=.true.\n  noinv=.true.\n")
+            f.write(f"  nbnd={NUM_WANNIER_FUNCTIONS + 10}\n")
         f.write("/\n&ELECTRONS\n  conv_thr=1.0d-6\n/\nATOMIC_SPECIES\n")
         for e in elements: f.write(f"  {e}  {atoms.get_masses()[atoms.get_chemical_symbols().index(e)]:.4f}  {pseudos[e]}\n")
         f.write("\nCELL_PARAMETERS angstrom\n")
         for i in range(3): f.write(f"  {atoms.cell[i,0]:16.10f} {atoms.cell[i,1]:16.10f} {atoms.cell[i,2]:16.10f}\n")
         f.write("\nATOMIC_POSITIONS angstrom\n")
         for s, p in zip(atoms.get_chemical_symbols(), atoms.positions): f.write(f"  {s:4s} {p[0]:16.10f} {p[1]:16.10f} {p[2]:16.10f}\n")
-        f.write(f"\nK_POINTS automatic\n  {k[0]} {k[1]} {k[2]}  0 0 0\n")
+        if calc == 'scf':
+            f.write(f"\nK_POINTS automatic\n  {k[0]} {k[1]} {k[2]}  0 0 0\n")
+        else:  # nscf - use explicit k-points for Wannier90 compatibility
+            f.write(f"\nK_POINTS crystal\n  {nkpts_nscf}\n")
+            for kpt in kpoints_nscf:
+                f.write(f"  {kpt[0]:16.10f} {kpt[1]:16.10f} {kpt[2]:16.10f}  1.0\n")
 print("QE inputs generated")
 
 # ========== STEP 3: RUN DFT CALCULATIONS WITH QUANTUM ESPRESSO (EXECUTABLE: pw.x) ==========
+import time
 for calc in ['scf', 'nscf']:
-    result = subprocess.run(f"cd {DFT_DIR} && mpirun -np {QE_NPROCS} {QE_EXECUTABLE} -in {MATERIAL_ID}_{calc}.in > {MATERIAL_ID}_{calc}.out 2>&1", shell=True, timeout=QE_TIMEOUT)
-    if result.returncode != 0:
+    print(f"Running DFT {calc.upper()}...", flush=True)
+    start_time = time.time()
+    proc = subprocess.Popen(f"cd {DFT_DIR} && mpirun -np {QE_NPROCS} {QE_EXECUTABLE} -in {MATERIAL_ID}_{calc}.in > {MATERIAL_ID}_{calc}.out 2>&1", shell=True)
+    out_file = os.path.join(DFT_DIR, f"{MATERIAL_ID}_{calc}.out")
+    last_line = ""
+    while proc.poll() is None:
+        time.sleep(2)
+        if os.path.exists(out_file):
+            with open(out_file, 'r', errors='ignore') as f:
+                lines = f.readlines()
+                if lines:
+                    for line in reversed(lines[-20:]):
+                        if 'iteration' in line.lower() or 'etot' in line.lower():
+                            if line.strip() != last_line:
+                                print(f"  {line.strip()}", flush=True)
+                                last_line = line.strip()
+                            break
+    elapsed = time.time() - start_time
+    if proc.returncode != 0:
         raise RuntimeError(f"DFT {calc} calculation failed for {MATERIAL_ID}")
-    with open(os.path.join(DFT_DIR, f"{MATERIAL_ID}_{calc}.out"), 'r', errors='ignore') as f:
+    with open(out_file, 'r', errors='ignore') as f:
         if "JOB DONE" not in f.read():
             raise RuntimeError(f"DFT {calc} did not complete successfully")
+    print(f"  {calc.upper()} complete in {elapsed:.1f}s")
 print("DFT calculations complete")
 
 # ========== STEP 4: WANNIER90 WORKFLOW (REAL CALCULATIONS WITH NEW QE BUILD) ==========
@@ -87,6 +128,13 @@ wan_dir = os.path.join(WANNIER_DIR, MATERIAL_ID)
 os.makedirs(wan_dir, exist_ok=True)
 seedname = "wan"
 win_file = os.path.join(wan_dir, f"{seedname}.win")
+nk = [K_POINTS[0]*2, K_POINTS[1]*2, K_POINTS[2]*2]
+nkpts = nk[0] * nk[1] * nk[2]
+kpoints = []
+for i in range(nk[0]):
+    for j in range(nk[1]):
+        for k in range(nk[2]):
+            kpoints.append([i/nk[0], j/nk[1], k/nk[2]])
 with open(win_file, 'w') as f:
     f.write(f"num_wann = {NUM_WANNIER_FUNCTIONS}\n")
     f.write(f"num_bands = {NUM_WANNIER_FUNCTIONS + 10}\n")
@@ -106,17 +154,16 @@ with open(win_file, 'w') as f:
     for s, p in zip(atoms.get_chemical_symbols(), atoms.get_scaled_positions()):
         f.write(f"{s} {p[0]:.10f} {p[1]:.10f} {p[2]:.10f}\n")
     f.write("end atoms_frac\n")
-    f.write(f"mp_grid = {K_POINTS[0]*2} {K_POINTS[1]*2} {K_POINTS[2]*2}\n")
+    f.write(f"mp_grid = {nk[0]} {nk[1]} {nk[2]}\n")
     f.write("begin kpoints\n")
-    nk = [k*2 for k in K_POINTS]
-    for i in range(nk[0]):
-        for j in range(nk[1]):
-            for k in range(nk[2]):
-                f.write(f"{i/nk[0]:.8f} {j/nk[1]:.8f} {k/nk[2]:.8f}\n")
+    for kpt in kpoints:
+        f.write(f"{kpt[0]:16.10f} {kpt[1]:16.10f} {kpt[2]:16.10f}\n")
     f.write("end kpoints\n")
 
+print("Running Wannier90 preprocessing...", flush=True)
 subprocess.run(f"cd {wan_dir} && {WANNIER90_EXECUTABLE} -pp {seedname} > {seedname}_pp.wout 2>&1", shell=True, timeout=QE_TIMEOUT, check=True)
 
+print("Extracting Wannier matrices from QE...", flush=True)
 pw2wan_input = os.path.join(wan_dir, "pw2wan.in")
 with open(pw2wan_input, 'w') as f:
     f.write("&inputpp\n")
@@ -127,9 +174,14 @@ with open(pw2wan_input, 'w') as f:
     f.write(f"  write_amn = .true.\n")
     f.write(f"  write_unk = .false.\n")
     f.write("/\n")
-subprocess.run(f"cd {wan_dir} && pw2wannier90.x < pw2wan.in > pw2wan.out 2>&1", shell=True, timeout=QE_TIMEOUT, check=True)
+start_time = time.time()
+subprocess.run(f"cd {wan_dir} && {PW2WANNIER90_EXECUTABLE} < pw2wan.in > pw2wan.out 2>&1", shell=True, timeout=QE_TIMEOUT, check=True)
+print(f"  pw2wannier90 complete in {time.time()-start_time:.1f}s")
 
+print("Running Wannier90 localization...", flush=True)
+start_time = time.time()
 subprocess.run(f"cd {wan_dir} && {WANNIER90_EXECUTABLE} {seedname} > {seedname}.wout 2>&1", shell=True, timeout=QE_TIMEOUT, check=True)
+print(f"  Wannier90 complete in {time.time()-start_time:.1f}s")
 hr_file = os.path.join(wan_dir, f"{seedname}_hr.dat")
 if not os.path.exists(hr_file):
     raise FileNotFoundError(f"Wannier90 failed to produce {hr_file}")
