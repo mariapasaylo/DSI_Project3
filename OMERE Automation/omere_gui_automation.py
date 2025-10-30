@@ -18,7 +18,7 @@ atom_disp = pyautogui.locateCenterOnScreen(
 
 if atom_disp:
     pyautogui.click(atom_disp)
-    time.sleep(0.5)
+    time.sleep(0.1)
 else:
     print("Button1 not found on screen.")
 
@@ -29,7 +29,7 @@ equiv_flu = pyautogui.locateCenterOnScreen(
 
 if equiv_flu:
     pyautogui.click(equiv_flu)
-    time.sleep(0.5)
+    time.sleep(0.1)
 else:
     print("Button2 not found on screen.")
 
@@ -53,7 +53,7 @@ proton_flu = pyautogui.locateCenterOnScreen(
 
 if proton_flu:
     pyautogui.click(proton_flu)
-    time.sleep(0.5)
+    time.sleep(0.1)
 else:
     print("Button7 not found on screen.")
 
@@ -65,7 +65,7 @@ electron_flu = pyautogui.locateCenterOnScreen(
 
 if electron_flu:
     pyautogui.click(electron_flu)
-    time.sleep(0.5)
+    time.sleep(0.1)
 else:
     print("Button8 not found on screen.")
 
@@ -77,7 +77,7 @@ energy_range = pyautogui.locateCenterOnScreen(
 
 if energy_range:
     pyautogui.click(energy_range)
-    time.sleep(0.5)
+    time.sleep(0.1)
 else:
     print("Button6 not found on screen.")
 
@@ -90,7 +90,7 @@ your_niel = pyautogui.locateCenterOnScreen(
 
 if your_niel:
     pyautogui.click(your_niel)
-    time.sleep(0.5)
+    time.sleep(0.1)
 else:
     print("Button4 not found on screen.")
 
@@ -102,7 +102,7 @@ niel_electrons = pyautogui.locateCenterOnScreen(
 
 if niel_electrons:
     pyautogui.click(niel_electrons)
-    time.sleep(0.5)
+    time.sleep(0.1)
 else:
     print("Button5 not found on screen.")
 
@@ -114,7 +114,7 @@ pyautogui.click()
 
 with open("electron_input_files.txt") as f:
     for line in f:            # loop through all of the electron input files and write their paths into the text box
-        time.sleep(0.5)       # add a bit of delay to simulate human-like behavior so that nothing gets out of sync
+        time.sleep(0.1)       # add a bit of delay to simulate human-like behavior so that nothing gets out of sync
 
         pyautogui.hotkey('ctrl', 'a')  # select all
         pyautogui.press('delete')      # delete to ensure nothing is in the text box
@@ -132,7 +132,7 @@ with open("electron_input_files.txt") as f:
 
         if ok:
             pyautogui.click(ok)
-            time.sleep(0.5)
+            time.sleep(0.1)
         else:
             print("Button9 not found on screen.")
 
@@ -143,7 +143,7 @@ with open("electron_input_files.txt") as f:
         )
 
         if output_file:
-            time.sleep(0.5)
+            time.sleep(0.1)
         else:
             print("Button5 not found on screen.")
 
@@ -169,7 +169,7 @@ with open("electron_input_files.txt") as f:
 
         if calc:
             pyautogui.click(calc)
-            time.sleep(7)
+            time.sleep(6)
         else:
             print("Button10 not found on screen.")
 
