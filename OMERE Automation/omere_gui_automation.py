@@ -6,7 +6,7 @@ from pywinauto import timings
 import time
 import pyautogui
 
-# Start OMERE
+# start OMERE
 app = Application().start(cmd_line=r"C:\Program Files (x86)\TRAD\OMERE 5.9\Omere.exe")
 
 time.sleep(2)
@@ -147,7 +147,7 @@ with open("electron_input_files.txt") as f:
         else:
             print("Button5 not found on screen.")
 
-        new_x = output_file.x + 100                 # move 100 pixels to the right to click on the text box
+        new_x = output_file.x + 100        # move 100 pixels to the right to click on the text box
         new_y = output_file.y
 
         pyautogui.moveTo(new_x, new_y)
@@ -170,17 +170,36 @@ with open("electron_input_files.txt") as f:
         if calc:
             pyautogui.click(calc)
             time.sleep(7)
-            break
         else:
             print("Button10 not found on screen.")
 
 
+        calc_params = pyautogui.locateCenterOnScreen(
+            r"images\calculation_parameters.png",
+            confidence=0.9
+        )
+
+        if calc_params:                         # click the Calculation Parameters button
+            pyautogui.click(calc_params)
+            time.sleep(0.5)
+        else:
+            print("Button3 not found on screen.")
+
+        niel_electrons = pyautogui.locateCenterOnScreen(   # find the NIEL Electrons text box and continue the loop to calculate for the next element
+            r"images\niel_electrons.png",
+            confidence=0.9
+        )
+
+        new_x = niel_electrons.x + 100      # move 100 pixels to the right to click on the text box
+        new_y = niel_electrons.y
+
+        pyautogui.moveTo(new_x, new_y)
+        pyautogui.click()
+
+
 
 # TO DO: 
-#   - Make the code work for all omere_inputs files
-#   - Write a script to write to the electron_input_files.txt the names of all of the file paths
-#     for the files in the omere_inputs folder (e.g "omere_inputs\Si_NIEL.dat")
-#   - Extract the necessary information from the output files
+#   - Extract the necessary information from the output files (still need to figure out what info we need)
 
 
 
