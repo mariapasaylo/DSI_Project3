@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Pipeline outputs
+outputs/
+*.out
+*.wout
+*.chk
+*.save/
+
+# Quantum ESPRESSO
+tmp/
+*.save
+*.wfc*
+*.igk*
+
+# TRIQS
+*.h5
+
+# Wannier90
+*.chk
+*.mmn
+*.amn
+*.eig
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+
+calculations
