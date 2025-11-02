@@ -1,3 +1,0 @@
-omere_inputs\Si_NIEL.dat
-omere_inputs\Al2O3_NIEL.dat
-omere_inputs\GaAs_NIEL.dat
